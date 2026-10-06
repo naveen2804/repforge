@@ -28,10 +28,18 @@ jobs:
 
       - run: npm ci
 
-      # Reads .env.production, which is committed: a Firebase web config is public by
-      # design, and firestore.rules is what actually protects the data.
+      # .env.production supplies the rest of the Firebase config. The API key comes from a
+      # repository secret so it is not in the repo; it still ends up in the built JS, as
+      # every web app's must, and firestore.rules is what actually protects the data.
       - name: Build
-        run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+        run: |
+          if [ -z "$VITE_FIREBASE_API_KEY" ]; then
+            echo "::error::Repository secret VITE_FIREBASE_API_KEY is not set."
+            exit 1
+          fi
+          npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
