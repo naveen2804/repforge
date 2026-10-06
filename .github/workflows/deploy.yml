@@ -28,22 +28,10 @@ jobs:
 
       - run: npm ci
 
+      # Reads .env.production, which is committed: a Firebase web config is public by
+      # design, and firestore.rules is what actually protects the data.
       - name: Build
-        env:
-          SUPABASE_URL_SECRET: ${{ secrets.VITE_SUPABASE_URL }}
-          SUPABASE_KEY_SECRET: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: |
-          # The build normally reads .env.production, which is committed: a Supabase anon
-          # key is public by design, and row level security is what actually protects the
-          # data. Repository secrets, if set, take precedence — an empty secret must not
-          # blank out the committed value, hence the guards.
-          if [ -n "$SUPABASE_URL_SECRET" ]; then
-            export VITE_SUPABASE_URL="$SUPABASE_URL_SECRET"
-          fi
-          if [ -n "$SUPABASE_KEY_SECRET" ]; then
-            export VITE_SUPABASE_ANON_KEY="$SUPABASE_KEY_SECRET"
-          fi
-          npm run build
+        run: npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:

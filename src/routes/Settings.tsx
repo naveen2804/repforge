@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSettings } from '../lib/settings'
-import { useAuth } from '../lib/auth'
+import { USERNAME_RULES, useAuth, validatePassword, validateUsername } from '../lib/auth'
 import { useStore } from '../lib/store'
 import { deleteCustomTemplate } from '../lib/db'
 import { ErrorNote } from '../components/Common'
@@ -10,9 +10,41 @@ import type { ThemeChoice, Unit } from '../lib/types'
 
 export function Settings() {
   const { theme, setTheme, unit, setUnit } = useSettings()
-  const { profile, signOut } = useAuth()
+  const { profile, isGuest, saveGuestAccount, signOut } = useAuth()
   const { sessions, byId, customTemplates, refresh, favorites } = useStore()
   const [error, setError] = useState<string | null>(null)
+  const [newUsername, setNewUsername] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  async function onSaveAccount(e: React.FormEvent) {
+    e.preventDefault()
+    setSaveError(null)
+    const problem = validateUsername(newUsername) ?? validatePassword(newPassword)
+    if (problem) return setSaveError(problem)
+    setSaving(true)
+    try {
+      await saveGuestAccount(newUsername, newPassword)
+      setNewUsername('')
+      setNewPassword('')
+    } catch (err) {
+      setSaveError((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function onSignOut() {
+    // A guest has no credentials to come back with, so signing out abandons the data.
+    if (
+      isGuest &&
+      !window.confirm('You are a guest. Signing out deletes access to these workouts for good. Sign out anyway?')
+    ) {
+      return
+    }
+    void signOut()
+  }
 
   /**
    * Export is the only backup that exists — there is no password reset, so it doubles as
@@ -86,7 +118,7 @@ export function Settings() {
       <div className="page-head">
         <div>
           <h1>Settings</h1>
-          <p className="sub">Signed in as {profile?.username ?? '…'}</p>
+          <p className="sub">{isGuest ? 'Signed in as a guest' : `Signed in as ${profile?.username ?? '…'}`}</p>
         </div>
       </div>
 
@@ -153,7 +185,7 @@ export function Settings() {
         </div>
         <div className="card">
           <p className="small muted" style={{ marginBottom: 12 }}>
-            {sessions.length} workout{sessions.length === 1 ? '' : 's'} stored in Supabase. There is no password
+            {sessions.length} workout{sessions.length === 1 ? '' : 's'} stored in your account. There is no password
             reset, so keep an export somewhere safe.
           </p>
           <div className="row" style={{ gap: 9 }}>
@@ -206,7 +238,44 @@ export function Settings() {
         <div className="section-head">
           <h2>Account</h2>
         </div>
-        <button type="button" className="btn danger block" onClick={() => void signOut()}>
+        {isGuest && (
+          <form className="card" onSubmit={onSaveAccount} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+            <div className="notice warn">
+              Guest workouts live only in this browser. Pick a username and password to keep them
+              and sign in from other devices.
+            </div>
+            <div className="field">
+              <label htmlFor="save-username">Username</label>
+              <input
+                id="save-username"
+                className="input"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                autoCapitalize="none"
+                autoCorrect="off"
+                autoComplete="username"
+                spellCheck={false}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="save-password">Password</label>
+              <input
+                id="save-password"
+                className="input"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+            <ErrorNote message={saveError} />
+            <button className="btn primary block" type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Save my account'}
+            </button>
+            <p className="small muted">{USERNAME_RULES} At least 8 characters for the password.</p>
+          </form>
+        )}
+        <button type="button" className="btn danger block" onClick={onSignOut}>
           Sign out
         </button>
       </section>

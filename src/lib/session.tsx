@@ -1,13 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { supabase } from './supabase'
 import { useAuth } from './auth'
-import type { DraftExercise, DraftSession, DraftSet, PlanItem } from './types'
+import { saveSession } from './db'
+import type { DraftExercise, DraftSession, DraftSet, FullSession, PlanItem } from './types'
 
 /**
- * The workout in progress lives in localStorage, not in Supabase. That keeps set entry
+ * The workout in progress lives in localStorage, not in Firestore. That keeps set entry
  * instant and fully usable with no signal in a gym basement; the whole session is written
- * to Supabase in one go when you tap Finish.
+ * to Firestore as one document when you tap Finish.
  */
 const DRAFT_KEY = 'repforge-active-session'
 
@@ -171,61 +171,44 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (!draft) throw new Error('No workout in progress.')
         if (!user) throw new Error('You need to be signed in to save a workout.')
 
-        const { data: session, error: sessionError } = await supabase
-          .from('workout_sessions')
-          .insert({
-            user_id: user.id,
-            started_at: draft.startedAt,
-            ended_at: new Date().toISOString(),
-            name: draft.name || 'Workout',
-            template_key: draft.templateKey,
-            notes: draft.notes || null,
-          })
-          .select('id')
-          .single()
-        if (sessionError) throw new Error(sessionError.message)
-
         // Only exercises that actually got a completed set are worth recording.
         const performed = draft.exercises
           .map((ex) => ({ ...ex, sets: ex.sets.filter((s) => s.completed) }))
           .filter((ex) => ex.sets.length > 0)
 
-        if (performed.length > 0) {
-          const { data: rows, error: exError } = await supabase
-            .from('session_exercises')
-            .insert(
-              performed.map((ex, i) => ({
-                user_id: user.id,
-                session_id: session.id,
-                exercise_id: ex.exerciseId,
-                order_index: i,
-                notes: ex.notes || null,
+        const sessionId = newId()
+        const session: FullSession = {
+          id: sessionId,
+          started_at: draft.startedAt,
+          ended_at: new Date().toISOString(),
+          name: draft.name || 'Workout',
+          template_key: draft.templateKey,
+          notes: draft.notes || null,
+          session_exercises: performed.map((ex, i) => {
+            const exerciseRowId = newId()
+            return {
+              id: exerciseRowId,
+              session_id: sessionId,
+              exercise_id: ex.exerciseId,
+              order_index: i,
+              notes: ex.notes || null,
+              sets: ex.sets.map((s, n) => ({
+                id: newId(),
+                session_exercise_id: exerciseRowId,
+                set_number: n + 1,
+                reps: s.reps,
+                weight_kg: s.weightKg,
+                duration_seconds: s.durationSeconds,
+                rpe: s.rpe,
+                completed: true,
               })),
-            )
-            .select('id, order_index')
-          if (exError) throw new Error(exError.message)
-
-          const byOrder = new Map(rows.map((r) => [r.order_index, r.id]))
-          const setRows = performed.flatMap((ex, i) =>
-            ex.sets.map((s, n) => ({
-              user_id: user.id,
-              session_exercise_id: byOrder.get(i)!,
-              set_number: n + 1,
-              reps: s.reps,
-              weight_kg: s.weightKg,
-              duration_seconds: s.durationSeconds,
-              rpe: s.rpe,
-              completed: true,
-            })),
-          )
-          if (setRows.length > 0) {
-            const { error: setError } = await supabase.from('sets').insert(setRows)
-            if (setError) throw new Error(setError.message)
-          }
+            }
+          }),
         }
+        await saveSession(session)
 
         setDraft(null)
-        return session.id as string
+        return sessionId
       },
     }
   }, [draft, user, mutateExercise])

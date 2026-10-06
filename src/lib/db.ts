@@ -1,40 +1,59 @@
-import { supabase } from './supabase'
+import {
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit as limitTo,
+  orderBy,
+  query,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore/lite'
+import { auth, firestore } from './firebase'
 import { estimate1RM, startOfDay } from './format'
 import type { FullSession, SessionRow, SetRow } from './types'
 
-const SESSION_SELECT = `
-  id, started_at, ended_at, name, template_key, notes,
-  session_exercises ( id, session_id, exercise_id, order_index, notes,
-    sets ( id, session_exercise_id, set_number, reps, weight_kg, duration_seconds, rpe, completed )
-  )
-`
+/**
+ * Firestore layout — everything a user owns sits under users/{uid}, which is the unit
+ * firestore.rules protects:
+ *
+ *   users/{uid}                      username, unit, favorites[], created_at
+ *   users/{uid}/sessions/{id}        one whole workout: its exercises and their sets are
+ *                                    nested inside, so a history load is one read per workout
+ *   users/{uid}/templates/{id}       saved custom splits
+ */
+function uid(): string {
+  const current = auth.currentUser
+  if (!current) throw new Error('You need to be signed in.')
+  return current.uid
+}
+
+const sessionsCol = () => collection(firestore, 'users', uid(), 'sessions')
+const templatesCol = () => collection(firestore, 'users', uid(), 'templates')
 
 export async function fetchSessions(limit = 200): Promise<FullSession[]> {
-  const { data, error } = await supabase
-    .from('workout_sessions')
-    .select(SESSION_SELECT)
-    .order('started_at', { ascending: false })
-    .limit(limit)
-  if (error) throw new Error(error.message)
-  return normalise((data ?? []) as unknown as FullSession[])
+  const snap = await getDocs(query(sessionsCol(), orderBy('started_at', 'desc'), limitTo(limit)))
+  return normalise(snap.docs.map((d) => ({ ...(d.data() as FullSession), id: d.id })))
 }
 
 export async function fetchSession(id: string): Promise<FullSession | null> {
-  const { data, error } = await supabase
-    .from('workout_sessions')
-    .select(SESSION_SELECT)
-    .eq('id', id)
-    .maybeSingle()
-  if (error) throw new Error(error.message)
-  return data ? normalise([data as unknown as FullSession])[0] : null
+  const snap = await getDoc(doc(sessionsCol(), id))
+  return snap.exists() ? normalise([{ ...(snap.data() as FullSession), id: snap.id }])[0] : null
+}
+
+export async function saveSession(session: FullSession): Promise<void> {
+  const { id, ...data } = session
+  await setDoc(doc(sessionsCol(), id), data)
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  const { error } = await supabase.from('workout_sessions').delete().eq('id', id)
-  if (error) throw new Error(error.message)
+  await deleteDoc(doc(sessionsCol(), id))
 }
 
-/** Supabase returns nested rows unordered; sort them so the UI can trust the order. */
+/** Sort the nested arrays so the UI can trust the order, whatever wrote the document. */
 function normalise(sessions: FullSession[]): FullSession[] {
   for (const s of sessions) {
     s.session_exercises = (s.session_exercises ?? []).sort((a, b) => a.order_index - b.order_index)
@@ -275,16 +294,14 @@ export function bodyPartSplit(
 // ---------------------------------------------------------------------------
 
 export async function fetchFavorites(): Promise<string[]> {
-  const { data, error } = await supabase.from('favorites').select('exercise_id')
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => r.exercise_id as string)
+  const snap = await getDoc(doc(firestore, 'users', uid()))
+  return (snap.data()?.favorites as string[] | undefined) ?? []
 }
 
 export async function toggleFavorite(userId: string, exerciseId: string, on: boolean): Promise<void> {
-  const { error } = on
-    ? await supabase.from('favorites').insert({ user_id: userId, exercise_id: exerciseId })
-    : await supabase.from('favorites').delete().eq('exercise_id', exerciseId)
-  if (error) throw new Error(error.message)
+  await updateDoc(doc(firestore, 'users', userId), {
+    favorites: on ? arrayUnion(exerciseId) : arrayRemove(exerciseId),
+  })
 }
 
 export interface CustomTemplate {
@@ -295,26 +312,18 @@ export interface CustomTemplate {
 }
 
 export async function fetchCustomTemplates(): Promise<CustomTemplate[]> {
-  const { data, error } = await supabase
-    .from('custom_templates')
-    .select('id, name, exercise_ids, created_at')
-    .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
-  return (data ?? []) as CustomTemplate[]
+  const snap = await getDocs(query(templatesCol(), orderBy('created_at', 'desc')))
+  return snap.docs.map((d) => ({ ...(d.data() as Omit<CustomTemplate, 'id'>), id: d.id }))
 }
 
 export async function saveCustomTemplate(
-  userId: string,
+  _userId: string,
   name: string,
   exerciseIds: string[],
 ): Promise<void> {
-  const { error } = await supabase
-    .from('custom_templates')
-    .insert({ user_id: userId, name, exercise_ids: exerciseIds })
-  if (error) throw new Error(error.message)
+  await setDoc(doc(templatesCol()), { name, exercise_ids: exerciseIds, created_at: new Date().toISOString() })
 }
 
 export async function deleteCustomTemplate(id: string): Promise<void> {
-  const { error } = await supabase.from('custom_templates').delete().eq('id', id)
-  if (error) throw new Error(error.message)
+  await deleteDoc(doc(templatesCol(), id))
 }

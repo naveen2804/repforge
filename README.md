@@ -1,6 +1,6 @@
 # RepForge
 
-A workout-planning and tracking PWA. Static frontend on GitHub Pages, data in Supabase,
+A workout-planning and tracking PWA. Static frontend on GitHub Pages, accounts and data in Firebase,
 installable to the home screen on Android and iOS.
 
 **Live:** https://naveen2804.github.io/repforge/
@@ -24,25 +24,26 @@ installable to the home screen on Android and iOS.
   per-exercise charts and personal records.
 - **A guided tour on first run** that walks through each screen, plus a ⓘ next to any bit
   of jargon and a full glossary.
-- **Accounts** — username and password, one private data set per person.
+- **Accounts** — username and password, one private data set per person, or a guest
+  mode that keeps workouts on one device until they are saved to an account.
 - Light/dark theme (light by default), kg/lb, JSON and CSV export.
 
 ## Setup
 
-### 1. Supabase — one-time, two manual steps
+### 1. Firebase — one-time setup
 
-Both are in the [Supabase dashboard](https://supabase.com/dashboard) for the project.
+In the [Firebase console](https://console.firebase.google.com/) for the project:
 
-**a. Create the schema.** Open **SQL Editor → New query**, paste all of
-[`supabase/schema.sql`](supabase/schema.sql), and run it. It creates the tables, indexes,
-row-level-security policies and the sign-up trigger.
-
-**b. Turn off e-mail confirmation.** Go to **Authentication → Sign In / Providers →
-Email** and switch **Confirm email** off, then save.
+- **Authentication → Sign-in method:** enable **Email/Password** and **Anonymous**.
+- **Firestore Database:** create it in production mode.
+- **Project settings → Your apps:** register a web app and copy its config into
+  `.env.production` (see `.env.example`).
+- Publish [`firestore.rules`](firestore.rules) — paste it into **Firestore → Rules**, or run
+  `node scripts/migrate-from-supabase.mjs <service-account.json> --rules-only`.
 
 RepForge signs people in with a plain username, which it maps onto a synthetic address in
-the `.invalid` domain — reserved by RFC 2606, so it can never reach a real inbox. With
-confirmation left on, Supabase would try to mail that address and sign-up would fail.
+the `.invalid` domain — reserved by RFC 2606, so it can never reach a real inbox. Firebase
+allows one account per address, which is also what keeps usernames unique.
 
 ### 2. Deploy
 
@@ -53,13 +54,14 @@ GitHub Pages. In **Settings → Pages**, set **Source** to **GitHub Actions** on
 
 Open the site and use **Create account**. Passwords are at least 8 characters. There is
 no e-mail on file, so **there is no password reset** — if a password is lost, the account
-has to be recreated from the Supabase dashboard. Settings → Export is the backup.
+has to be recreated from the Firebase console. **Continue as guest** skips the
+username entirely; a guest can save their account from Settings later. Settings → Export is the backup.
 
 ## Local development
 
 ```bash
 npm install
-cp .env.example .env      # then fill in your Supabase URL and anon key
+cp .env.example .env      # then fill in your Firebase web config
 npm run dev
 ```
 
@@ -86,20 +88,22 @@ re-encodes the 1,746 demo photos to 420px WebP — 101 MB of JPEG becomes about 
 | Frontend | Vite + React 19 + TypeScript, plain CSS with custom properties |
 | Routing | `HashRouter` — GitHub Pages serves static files only and would 404 on deep links |
 | PWA | `vite-plugin-pwa`; app shell and catalogue precached, exercise photos cached lazily |
-| Data | Supabase Postgres via PostgREST, row level security scoped to `auth.uid()` |
+| Data | Firebase Auth + Cloud Firestore (lite SDK), security rules scoped to `request.auth.uid` |
 | Hosting | GitHub Pages via Actions |
 
 A few decisions worth knowing about:
 
-- **The workout in progress lives in `localStorage`, not Supabase.** Set entry stays
-  instant and works with no signal; the whole session is written in one transaction-ish
-  batch when you tap Finish.
+- **The workout in progress lives in `localStorage`, not Firestore.** Set entry stays
+  instant and works with no signal; the whole session is written as one document when
+  you tap Finish.
+- **One Firestore document per workout**, with its exercises and sets nested inside, so
+  loading history costs one read per workout — well inside the free tier's 50k reads/day.
 - **Weights are always stored in kg.** The kg/lb setting only affects display, so
   switching units never rewrites history.
 - **Stats are computed client-side** from the sets you have logged — no aggregate tables
   to keep in step. Personal records, streaks and charts are all derived on the fly.
 - **The exercise catalogue is static**, bundled with the app rather than stored in
-  Supabase: it is read-only, rarely changes, and this way it works offline.
+  Firestore: it is read-only, rarely changes, and this way it works offline.
 - **Body parts and splits are drawn, not emoji.** `BodyMap` renders a figure with the
   worked muscles highlighted, because there is no honest emoji for "back" or
   "hamstrings" — and the same component previews a whole split by lighting up several
@@ -109,10 +113,14 @@ A few decisions worth knowing about:
 
 ## Security
 
-Every table has row level security enabled with a policy of `user_id = auth.uid()`, so
-each account can only read and write its own rows. The Supabase anon key is embedded in
-the build — that is how Supabase is designed to work on a static site, and it grants
-nothing on its own without valid credentials.
+Everything a user owns lives under `users/{uid}`, and [`firestore.rules`](firestore.rules)
+lets a signed-in user read and write that subtree and nothing else. Guests get a uid too,
+so the same rule covers them. The Firebase web config is embedded in the build — that is
+how Firebase is designed to work on a static site, and it grants nothing on its own.
+
+The project moved from Supabase in October 2026, because the free tier pauses after a
+week of inactivity. Accounts kept their uids and bcrypt password hashes
+([`scripts/migrate-from-supabase.mjs`](scripts/migrate-from-supabase.mjs)).
 
 ## Credits
 

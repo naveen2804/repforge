@@ -56,7 +56,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           charts: ['recharts'],
-          supabase: ['@supabase/supabase-js'],
+          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore/lite'],
         },
       },
     },

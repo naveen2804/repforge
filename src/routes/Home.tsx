@@ -21,7 +21,7 @@ export function Home() {
   const { loading, sessions, exercises } = useStore()
   const { draft, start } = useSession()
   const { unit } = useSettings()
-  const { profile } = useAuth()
+  const { profile, isGuest } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
 
@@ -61,6 +61,13 @@ export function Home() {
           </p>
         </div>
       </div>
+
+      {isGuest && (
+        <div className="notice warn" style={{ marginBottom: 16 }}>
+          You're using RepForge as a guest — workouts are saved on this device only.{' '}
+          <Link to="/settings">Save your account</Link> to keep them.
+        </div>
+      )}
 
       <section>
         <div className="grid stats">

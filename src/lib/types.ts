@@ -62,7 +62,7 @@ export interface DraftSession {
   exercises: DraftExercise[]
 }
 
-/** Rows as they come back from Supabase. */
+/** Workout records as stored (one Firestore document per session, exercises and sets nested). */
 export interface SessionRow {
   id: string
   started_at: string

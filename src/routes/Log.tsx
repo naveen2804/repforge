@@ -115,7 +115,7 @@ export function Log() {
       const id = await finish()
       if (templateName.trim() && user) {
         await saveCustomTemplate(
-          user.id,
+          user.uid,
           templateName.trim(),
           draft!.exercises.map((ex) => ex.exerciseId),
         )

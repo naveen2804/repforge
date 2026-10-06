@@ -52,7 +52,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (templateResult.status === 'fulfilled') setCustomTemplates(templateResult.value)
 
     const failure = [sessionResult, favResult, templateResult].find((r) => r.status === 'rejected')
-    setError(failure ? (failure as PromiseRejectedResult).reason?.message ?? 'Could not reach Supabase.' : null)
+    setError(failure ? (failure as PromiseRejectedResult).reason?.message ?? 'Could not reach the server.' : null)
   }, [user])
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return next
       })
       try {
-        await toggleFavoriteRow(user.id, exerciseId, on)
+        await toggleFavoriteRow(user.uid, exerciseId, on)
       } catch {
         // Put it back the way it was if the write did not land.
         setFavorites((prev) => {
